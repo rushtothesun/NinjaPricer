@@ -60,12 +60,12 @@ public partial class NinjaPricer
 
     private static List<CustomItem> FormatItems(IEnumerable<NormalInventoryItem> itemList)
     {
-        return itemList.Where(x => x?.Item?.IsValid == true).Select(inventoryItem => new CustomItem(inventoryItem)).ToList();
+        return itemList?.Where(x => x?.Item?.IsValid == true).Select(inventoryItem => new CustomItem(inventoryItem)).ToList() ?? [];
     }
 
     private static bool TryGetShardParent(string shardBaseName, out string shardParent)
     {
-        return ShardMapping.TryGetValue(shardBaseName, out shardParent);
+        return ShardMapping.TryGetValue(shardBaseName ?? "<unknown>", out shardParent);
     }
 
     private void GetHoveredItem()
@@ -105,6 +105,11 @@ public partial class NinjaPricer
 
     private void GetValue(IEnumerable<CustomItem> items)
     {
+        if (items == null)
+        {
+            return;
+        }
+
         foreach (var customItem in items)
         {
             GetValue(customItem);
@@ -113,6 +118,11 @@ public partial class NinjaPricer
 
     private T GetValue<T>(T items) where T : IReadOnlyCollection<CustomItem>
     {
+        if (items == null)
+        {
+            return default;
+        }
+
         foreach (var customItem in items)
         {
             GetValue(customItem);
@@ -250,10 +260,8 @@ public partial class NinjaPricer
         }
         finally
         {
-            if (item.PriceData.MaxChaosValue == 0)
-            {
-                item.PriceData.MaxChaosValue = item.PriceData.MinChaosValue;
-            }
+            item.PriceData.MinChaosValue = Math.Max(0, item.PriceData.MinChaosValue);
+            item.PriceData.MaxChaosValue = Math.Max(item.PriceData.MaxChaosValue, item.PriceData.MinChaosValue);
         }
     }
 
