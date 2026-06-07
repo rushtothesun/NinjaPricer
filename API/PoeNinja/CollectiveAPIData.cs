@@ -17,6 +17,9 @@ public class CollectiveApiData
     public ExchangeOverview Abyss { get; set; }
     public ExchangeOverview Expedition { get; set; }
     public ExchangeOverview Verisium { get; set; }
+    public ExchangeOverview LineageSupportGems { get; set; }
+    public ExchangeOverview SoulCores { get; set; }
+    public ExchangeOverview Idols { get; set; }
 
     public StashOverview Weapons { get; set; }
     public StashOverview Armour { get; set; }
@@ -24,6 +27,8 @@ public class CollectiveApiData
     public StashOverview Flasks { get; set; }
     public StashOverview Jewels { get; set; }
     public StashOverview Maps { get; set; }
+    public StashOverview Charms { get; set; }
+    public StashOverview SanctumRelics { get; set; }
 
     public double DivineToExaltedRate { get; set; }
 
@@ -44,6 +49,4 @@ public class CollectiveApiData
             throw new Exception($"Unknown primary {Currency.Core.Primary}");
         }
     }
-
-    public double PrimaryToExaltedRate => Currency.Core.Primary == "exalted" ? 1 : Currency.Core.Rates.Exalted.Value;
 }

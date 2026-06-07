@@ -218,7 +218,7 @@ public partial class NinjaPricer : BaseSettingsPlugin<NinjaPricerSettings>
         {
             var leagueListFromUrl = Utils.DownloadFromUrl("https://poe.ninja/poe2/api/data/index-state").Result;
             var leagueData = JsonConvert.DeserializeObject<LeagueRoot>(leagueListFromUrl);
-            leagueList.UnionWith(leagueData.economyLeagues.Where(league => league.indexed).Select(league => league.name));
+            leagueList.UnionWith(leagueData.economyLeagues.Select(league => league.name));
         }
         catch (Exception ex)
         {

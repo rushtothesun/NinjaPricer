@@ -30,6 +30,9 @@ public class ExchangeOverview
             return _linesByName;
         }
     }
+
+    [JsonIgnore]
+    public double PrimaryToExaltedRate => Core.Primary == "exalted" ? 1 : Core.Rates.Exalted.Value;
 }
 
 public class StashOverview
@@ -39,6 +42,9 @@ public class StashOverview
 
     [JsonProperty("lines")]
     public List<StashLine> Lines { get; set; }
+
+    [JsonIgnore]
+    public double PrimaryToExaltedRate => Core.Primary == "exalted" ? 1 : Core.Rates.Exalted.Value;
 }
 
 public class CoreData
