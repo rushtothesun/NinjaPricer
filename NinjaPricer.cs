@@ -247,7 +247,11 @@ public partial class NinjaPricer : BaseSettingsPlugin<NinjaPricerSettings>
             }
             else
             {
-                if (playerLeague.StartsWith("SSF "))
+                if (playerLeague.StartsWith("HC SSF "))
+                {
+                    playerLeague = $"HC {playerLeague["HC SSF ".Length..]}";
+                }
+                else if (playerLeague.StartsWith("SSF "))
                 {
                     playerLeague = playerLeague["SSF ".Length..];
                 }
