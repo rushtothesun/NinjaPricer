@@ -55,7 +55,20 @@ public partial class NinjaPricer
     private List<NormalInventoryItem> GetInventoryItems()
     {
         var inventory = GameController.Game.IngameState.IngameUi.InventoryPanel;
-        return !inventory.IsVisible ? null : inventory[InventoryIndex.PlayerInventory].VisibleInventoryItems.ToList();
+        if (!inventory.IsVisible)
+        {
+            return [];
+        }
+
+        if (!GameController.IsUsingController)
+        {
+            return inventory[InventoryIndex.PlayerInventory].VisibleInventoryItems.ToList();
+        }
+
+        var getControllerInventoryItems = GetControllerUiBridgeMethod(
+            ref _getControllerVisibleInventoryItems,
+            "ControllerUi.GetVisibleInventoryItems");
+        return getControllerInventoryItems?.Invoke() ?? [];
     }
 
     private static List<CustomItem> FormatItems(IEnumerable<NormalInventoryItem> itemList)
@@ -313,6 +326,11 @@ public partial class NinjaPricer
             {
                 if (Settings.DebugSettings.EnableDebugLogging) { LogMessage($"{GetCurrentMethod()}.ShouldUpdateValuesInventory() Inventory is not visible", 5, Color.DarkGray); }
                 return false;
+            }
+
+            if (GameController.IsUsingController)
+            {
+                return true;
             }
 
             // Dont continue if the stash page isnt even open

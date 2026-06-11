@@ -40,6 +40,17 @@ public partial class NinjaPricer
 
     private CustomItem HoveredItem;
     private RectangleF? HoveredItemTooltipRect;
+    private Func<Element, RectangleF?> _getControllerUiRect;
+    private Func<Element, RectangleF?> _getControllerTooltipHeaderTextRect;
+    private Func<List<NormalInventoryItem>> _getControllerVisibleStashItems;
+    private Func<List<NormalInventoryItem>> _getControllerVisibleInventoryItems;
+    private Func<List<NormalInventoryItem>> _getControllerVisibleSellWindowItems;
+    private Func<bool> _getControllerGemcuttingWindowVisible;
+    private bool _isControllerGemcuttingWindowVisible;
+    private DateTime _nextControllerGemcuttingWindowCheck = DateTime.MinValue;
+    private Func<bool> _getControllerDisenchantWindowVisible;
+    private bool _isControllerDisenchantWindowVisible;
+    private DateTime _nextControllerDisenchantWindowCheck = DateTime.MinValue;
 
     private readonly CachedValue<List<ItemOnGround>> _slowGroundItems;
     private readonly CachedValue<List<ItemOnGround>> _groundItems;
@@ -144,13 +155,13 @@ public partial class NinjaPricer
         if (Settings.DebugSettings.EnableDebugLogging)
             LogMessage($"{GetCurrentMethod()}: Selected League: {Settings.DataSourceSettings.League.Value}", 5, Color.White);
 
-        var tabType = StashPanel.VisibleStash?.InvType;
+        var tabType = GetVisibleStashType();
 
         // Everything is updated, lets check if we should draw
         if (ShouldUpdateValues())
         {
             // Format stash items
-            ItemList = StashPanel.IsVisible && tabType != null ? StashPanel.VisibleStash?.VisibleInventoryItems?.ToList() ?? [] : [];
+            ItemList = GetVisibleStashItems(tabType);
             if (ItemList.Count == 0)
             {
                 if (Settings.LeagueSpecificSettings.ShowRitualWindowPrices &&
@@ -167,6 +178,12 @@ public partial class NinjaPricer
                          GameController.Game.IngameState.IngameUi.PurchaseWindowHideout?.TabContainer?.VisibleStash is { IsVisible: true, VisibleInventoryItems: { Count: > 0 } hideoutPurchaseWindowItems })
                 {
                     ItemList = hideoutPurchaseWindowItems.ToList();
+                }
+                else if (GameController.IsUsingController &&
+                         IsControllerSellWindowVisible() &&
+                         GetControllerSellWindowItems() is { Count: > 0 } sellWindowItems)
+                {
+                    ItemList = sellWindowItems;
                 }
             }
 
@@ -224,30 +241,48 @@ public partial class NinjaPricer
 
     public void DrawGraphics()
     {
+        var suppressContainerPrices = IsControllerGemcuttingWindowVisible();
         ProcessItemsOnGround();
         ProcessTradeWindow();
-        ProcessHoveredItem();
-        VisibleInventoryValue();
+        if (!suppressContainerPrices)
+        {
+            ProcessHoveredItem();
+            VisibleInventoryValue();
+        }
+
         ProcessExchangeCurrencyPicker();
 
         if (StashPanel.IsVisible)
         {
+            if (suppressContainerPrices)
+            {
+                return;
+            }
+
             VisibleStashValue();
 
-            var tabType = StashPanel.VisibleStash?.InvType;
+            var tabType = GetVisibleStashType();
             var layout = Settings.StashValueSettings.GetPriceOverlayLayout(tabType);
             if (!Settings.PriceOverlaySettings.Show ||
                 Settings.PriceOverlaySettings.DoNotDrawWhileAnItemIsHovered && HoveredItem != null ||
                 !layout.Enabled) return;
 
-            foreach (var customItem in ItemsToDrawList.Where(customItem => customItem.ItemType != ItemTypes.None))
+            var pricedItems = ItemsToDrawList
+                .Where(customItem => customItem.ItemType != ItemTypes.None)
+                .ToList();
+            var containerBox = GameController.IsUsingController
+                ? FindControllerStashScrollViewport(pricedItems)?.GetClientRect()
+                : null;
+
+            foreach (var customItem in pricedItems)
             {
-                PriceBoxOverItem(customItem, null, null, null, layout);
+                PriceBoxOverItem(customItem, containerBox, null, null, layout);
             }
         }
         else if (Settings.LeagueSpecificSettings.ShowRitualWindowPrices && GameController.IngameState.IngameUi.RitualWindow.IsVisible ||
                  Settings.LeagueSpecificSettings.ShowPurchaseWindowPrices && (GameController.IngameState.IngameUi.PurchaseWindow.IsVisible ||
-                                                                              GameController.IngameState.IngameUi.PurchaseWindowHideout.IsVisible))
+                                                                              GameController.IngameState.IngameUi.PurchaseWindowHideout.IsVisible) ||
+                 IsControllerSellWindowVisible())
         {
             if (!Settings.PriceOverlaySettings.Show || Settings.PriceOverlaySettings.DoNotDrawWhileAnItemIsHovered && HoveredItem != null) return;
             foreach (var customItem in ItemsToDrawList.Where(customItem => customItem.ItemType != ItemTypes.None))
@@ -255,6 +290,167 @@ public partial class NinjaPricer
                 DrawItemPriceInline(customItem);
             }
         }
+    }
+
+    private T GetControllerUiBridgeMethod<T>(ref T method, string name)
+        where T : class
+    {
+        if (!GameController.IsUsingController)
+        {
+            return null;
+        }
+
+        try
+        {
+            method ??= GameController.PluginBridge.GetMethod<T>(name);
+        }
+        catch
+        {
+            method = null;
+        }
+
+        return method;
+    }
+
+    private bool IsControllerGemcuttingWindowVisible()
+    {
+        if (!GameController.IsUsingController)
+        {
+            return false;
+        }
+
+        if (DateTime.UtcNow < _nextControllerGemcuttingWindowCheck)
+        {
+            return _isControllerGemcuttingWindowVisible;
+        }
+
+        _nextControllerGemcuttingWindowCheck = DateTime.UtcNow.AddMilliseconds(1000);
+        var isGemcuttingWindowVisible = GetControllerUiBridgeMethod(
+            ref _getControllerGemcuttingWindowVisible,
+            "ControllerUi.IsGemcuttingWindowVisible");
+        _isControllerGemcuttingWindowVisible = isGemcuttingWindowVisible?.Invoke() == true;
+        return _isControllerGemcuttingWindowVisible;
+    }
+
+    private bool IsControllerDisenchantWindowVisible()
+    {
+        if (!GameController.IsUsingController)
+        {
+            return false;
+        }
+
+        if (DateTime.UtcNow < _nextControllerDisenchantWindowCheck)
+        {
+            return _isControllerDisenchantWindowVisible;
+        }
+
+        _nextControllerDisenchantWindowCheck = DateTime.UtcNow.AddMilliseconds(1000);
+        var isDisenchantWindowVisible = GetControllerUiBridgeMethod(
+            ref _getControllerDisenchantWindowVisible,
+            "ControllerUi.IsDisenchantWindowVisible");
+        _isControllerDisenchantWindowVisible = isDisenchantWindowVisible?.Invoke() == true;
+        return _isControllerDisenchantWindowVisible;
+    }
+
+    private InventoryType? GetVisibleStashType()
+    {
+        return GameController.IsUsingController
+            ? null
+            : StashPanel.VisibleStash?.InvType;
+    }
+
+    private List<NormalInventoryItem> GetVisibleStashItems(InventoryType? tabType)
+    {
+        if (!StashPanel.IsVisible)
+        {
+            return [];
+        }
+
+        if (!GameController.IsUsingController)
+        {
+            return tabType != null
+                ? StashPanel.VisibleStash?.VisibleInventoryItems?.ToList() ?? []
+                : [];
+        }
+
+        var getControllerStashItems = GetControllerUiBridgeMethod(
+            ref _getControllerVisibleStashItems,
+            "ControllerUi.GetVisibleStashItems");
+        return getControllerStashItems?.Invoke() ?? [];
+    }
+
+    private List<NormalInventoryItem> GetControllerSellWindowItems()
+    {
+        var getControllerSellWindowItems = GetControllerUiBridgeMethod(
+            ref _getControllerVisibleSellWindowItems,
+            "ControllerUi.GetVisibleSellWindowItems");
+        return getControllerSellWindowItems?.Invoke() ?? [];
+    }
+
+    private static Element FindControllerStashScrollViewport(IEnumerable<CustomItem> items)
+    {
+        return items
+            .Select(item => FindControllerStashScrollViewport(item.Element, 20))
+            .FirstOrDefault(viewport => viewport != null);
+    }
+
+    private static Element FindControllerStashScrollViewport(Element element, int depth)
+    {
+        var content = element;
+        for (var remainingDepth = depth; content?.IsValid == true && remainingDepth >= 0; remainingDepth--)
+        {
+            var viewport = content.Parent;
+            if (viewport?.IsValid == true &&
+                viewport.IsVisible &&
+                content.IsVisible &&
+                IsScrollViewportPair(viewport, content))
+            {
+                return viewport;
+            }
+
+            content = viewport;
+        }
+
+        return null;
+    }
+
+    private static bool IsScrollViewportPair(Element viewport, Element content)
+    {
+        var viewportRect = viewport.GetClientRect();
+        var contentRect = content.GetClientRect();
+        if (!IsUsableScrollRect(viewportRect) || !IsUsableScrollRect(contentRect))
+        {
+            return false;
+        }
+
+        var overflowThreshold = Math.Max(50f, Math.Min(viewport.Width, viewport.Height) * 0.1f);
+        var containmentTolerance = Math.Max(4f, Math.Min(viewportRect.Width, viewportRect.Height) * 0.02f);
+        var verticalScroll =
+            content.Height > viewport.Height + overflowThreshold &&
+            contentRect.Left >= viewportRect.Left - containmentTolerance &&
+            contentRect.Right <= viewportRect.Right + containmentTolerance;
+        var horizontalScroll =
+            content.Width > viewport.Width + overflowThreshold &&
+            contentRect.Top >= viewportRect.Top - containmentTolerance &&
+            contentRect.Bottom <= viewportRect.Bottom + containmentTolerance;
+
+        return verticalScroll || horizontalScroll;
+    }
+
+    private static bool IsUsableScrollRect(RectangleF rect)
+    {
+        return rect.Width > 0 &&
+               rect.Height > 0 &&
+               float.IsFinite(rect.X) &&
+               float.IsFinite(rect.Y) &&
+               float.IsFinite(rect.Width) &&
+               float.IsFinite(rect.Height);
+    }
+
+    private bool IsControllerSellWindowVisible()
+    {
+        return GameController.IsUsingController &&
+               GameController.IngameState.IngameUi.SellWindow?.IsVisible == true;
     }
 
     private void ProcessExchangeCurrencyPicker()
@@ -284,7 +480,7 @@ public partial class NinjaPricer
                         var bottomRight = optionRect.BottomRight;
                         var typePrice = item.PriceData.MinChaosValue;
                         {
-                            var text = typePrice.FormatNumber(Settings.VisualPriceSettings.SignificantDigits.Value);
+                            var text = FormatOverlayPrice(typePrice, Settings.VisualPriceSettings.SignificantDigits.Value);
                             var textSize = Graphics.MeasureText(text);
                             var textRect = new RectangleF(topRight.X - textSize.X, topRight.Y, textSize.X, textSize.Y);
                             if ((HoveredItemTooltipRect?.Intersects(textRect) ?? false) ||
@@ -300,7 +496,7 @@ public partial class NinjaPricer
                         if (currencyOption.Owned is > 0 and var owned)
                         {
                             var totalOwned = typePrice * owned;
-                            var text2 = $"Owned: {totalOwned.FormatNumber(Settings.VisualPriceSettings.SignificantDigits.Value)}";
+                            var text2 = $"Owned: {FormatOverlayPrice(totalOwned, Settings.VisualPriceSettings.SignificantDigits.Value)}";
                             var textSize2 = Graphics.MeasureText(text2);
                             var textRect2 = new RectangleF(bottomRight.X - textSize2.X, bottomRight.Y - textSize2.Y, textSize2.X, textSize2.Y);
                             if ((HoveredItemTooltipRect?.Intersects(textRect2) ?? false) ||
@@ -325,7 +521,7 @@ public partial class NinjaPricer
 
     private void DrawItemPriceInline(CustomItem customItem)
     {
-        var text = customItem.PriceData.MinChaosValue.FormatNumber(Settings.VisualPriceSettings.SignificantDigits.Value);
+        var text = FormatOverlayPrice(customItem.PriceData.MinChaosValue, Settings.VisualPriceSettings.SignificantDigits.Value);
         var textSize = Graphics.MeasureText(text);
         var topRight = customItem.Element.GetClientRectCache.TopRight;
         if (HoveredItemTooltipRect?.Intersects(new RectangleF(topRight.X - textSize.X, topRight.Y, textSize.X, textSize.Y)) ?? false)
@@ -338,6 +534,168 @@ public partial class NinjaPricer
         Graphics.DrawTextWithBackground(text,
             textCenter,
             textColor, FontAlign.Center, backgroundColor);
+    }
+
+    private PriceDisplayUnit GetOverlayDisplayUnit()
+    {
+        return Enum.TryParse<PriceDisplayUnit>(Settings.PriceOverlaySettings.DisplayUnit.Value, out var unit)
+            ? unit
+            : PriceDisplayUnit.Exalted;
+    }
+
+    private double? GetPriceUnitValue(PriceDisplayUnit unit)
+    {
+        return unit switch
+        {
+            PriceDisplayUnit.Chaos => GetChaosToExaltedRate(),
+            PriceDisplayUnit.Exalted => 1,
+            PriceDisplayUnit.Divine => DivinePrice > 0 ? DivinePrice : null,
+            _ => null
+        };
+    }
+
+    private double? GetChaosToExaltedRate()
+    {
+        var currency = CollectedData?.Currency;
+        if (currency == null)
+        {
+            return null;
+        }
+
+        if (string.Equals(currency.Core?.Primary, "chaos", StringComparison.OrdinalIgnoreCase))
+        {
+            return currency.PrimaryToExaltedRate;
+        }
+
+        if (currency.Core?.Rates?.Chaos is > 0 and var chaosPerPrimary)
+        {
+            return currency.PrimaryToExaltedRate / chaosPerPrimary;
+        }
+
+        return currency.LinesByName.GetValueOrDefault("Chaos Orb") is { } chaos
+            ? chaos.Line.PrimaryValue * currency.PrimaryToExaltedRate
+            : null;
+    }
+
+    private static string GetPriceUnitSuffix(PriceDisplayUnit unit)
+    {
+        return unit switch
+        {
+            PriceDisplayUnit.Chaos => "c",
+            PriceDisplayUnit.Exalted => "ex",
+            PriceDisplayUnit.Divine => "d",
+            _ => string.Empty
+        };
+    }
+
+    private static string GetPriceUnitLabel(PriceDisplayUnit unit)
+    {
+        return unit switch
+        {
+            PriceDisplayUnit.Chaos => "Chaos",
+            PriceDisplayUnit.Exalted => "Exalt",
+            PriceDisplayUnit.Divine => "Divine",
+            _ => unit.ToString()
+        };
+    }
+
+    private double GetOverlayDisplayValue(double exaltedValue)
+    {
+        var unitValue = GetPriceUnitValue(GetOverlayDisplayUnit());
+        return unitValue is > 0 ? exaltedValue / unitValue.Value : exaltedValue;
+    }
+
+    private double? GetDisplayValue(double exaltedValue, PriceDisplayUnit unit)
+    {
+        var unitValue = GetPriceUnitValue(unit);
+        return unitValue is > 0 ? exaltedValue / unitValue.Value : null;
+    }
+
+    private string FormatOverlayPrice(double exaltedValue, int significantDigits)
+    {
+        var unit = GetOverlayDisplayUnit();
+        var unitValue = GetPriceUnitValue(unit);
+        var hasUnitValue = unitValue is > 0;
+        var displayValue = hasUnitValue ? exaltedValue / unitValue.Value : exaltedValue;
+        var suffix = Settings.PriceOverlaySettings.ShowUnitSuffix && hasUnitValue
+            ? GetPriceUnitSuffix(unit)
+            : string.Empty;
+
+        return displayValue.FormatNumber(significantDigits, Settings.VisualPriceSettings.MaximalValueForFractionalDisplay) + suffix;
+    }
+
+    private IEnumerable<PriceDisplayUnit> GetDetailedPriceUnits()
+    {
+        if (Settings.HoveredItemSettings.ShowDivineValue)
+        {
+            yield return PriceDisplayUnit.Divine;
+        }
+
+        if (Settings.HoveredItemSettings.ShowExaltedValue)
+        {
+            yield return PriceDisplayUnit.Exalted;
+        }
+
+        if (Settings.HoveredItemSettings.ShowChaosValue)
+        {
+            yield return PriceDisplayUnit.Chaos;
+        }
+    }
+
+    private bool ShouldShowDetailedPriceUnit(PriceDisplayUnit unit, double displayValue)
+    {
+        var absoluteValue = Math.Abs(displayValue);
+        return unit switch
+        {
+            PriceDisplayUnit.Divine => !Settings.HoveredItemSettings.OnlyShowDivineAboveThreshold ||
+                                       absoluteValue >= Settings.HoveredItemSettings.DivineDisplayThreshold,
+            PriceDisplayUnit.Exalted => !Settings.HoveredItemSettings.OnlyShowExaltedAboveThreshold ||
+                                        absoluteValue >= Settings.HoveredItemSettings.ExaltedDisplayThreshold,
+            PriceDisplayUnit.Chaos => !Settings.HoveredItemSettings.OnlyShowChaosAboveThreshold ||
+                                      absoluteValue >= Settings.HoveredItemSettings.ChaosDisplayThreshold,
+            _ => true
+        };
+    }
+
+    private string FormatDetailedPriceValue(double displayValue, int significantDigits)
+    {
+        return displayValue.FormatNumber(significantDigits, Settings.VisualPriceSettings.MaximalValueForFractionalDisplay);
+    }
+
+    private IEnumerable<string> FormatDetailedPriceLines(double minPrice, double? maxPrice = null, int stackSize = 0)
+    {
+        foreach (var unit in GetDetailedPriceUnits())
+        {
+            var minDisplayValue = GetDisplayValue(minPrice, unit);
+            if (minDisplayValue == null || !ShouldShowDetailedPriceUnit(unit, minDisplayValue.Value))
+            {
+                continue;
+            }
+
+            var label = GetPriceUnitLabel(unit);
+            var suffix = GetPriceUnitSuffix(unit);
+            var maxDisplayValue = maxPrice.HasValue ? GetDisplayValue(maxPrice.Value, unit) : null;
+            var hasRange = maxDisplayValue.HasValue && Math.Abs(maxDisplayValue.Value - minDisplayValue.Value) > 1e-10;
+            var line = hasRange
+                ? $"{label}: {FormatDetailedPriceValue(minDisplayValue.Value, 2)}{suffix} - {FormatDetailedPriceValue(maxDisplayValue.Value, 2)}{suffix}"
+                : $"{label}: {FormatDetailedPriceValue(minDisplayValue.Value, 2)}{suffix}";
+
+            if (stackSize > 0)
+            {
+                var perOneValue = minDisplayValue.Value / stackSize;
+                line += $" ({FormatDetailedPriceValue(perOneValue, 2)}{suffix} per one)";
+            }
+
+            yield return line;
+        }
+    }
+
+    private void AddPriceLines(Action<string> addText, double minPrice, double? maxPrice = null, int stackSize = 0)
+    {
+        foreach (var line in FormatDetailedPriceLines(minPrice, maxPrice, stackSize))
+        {
+            addText($"\n{line}");
+        }
     }
 
     private void ProcessHoveredItem()
@@ -373,10 +731,7 @@ public partial class NinjaPricer
             AddText(changeText);
         }
 
-        var priceInChaos = HoveredItem.PriceData.MinChaosValue;
-        var priceInDivines = priceInChaos / DivinePrice;
-        var priceInDivinesText = priceInDivines.FormatNumber(2);
-        var minPriceText = priceInChaos.FormatNumber(2, Settings.VisualPriceSettings.MaximalValueForFractionalDisplay);
+        var priceInExalts = HoveredItem.PriceData.MinChaosValue;
         AddSection();
         switch (HoveredItem.ItemType)
         {
@@ -394,14 +749,7 @@ public partial class NinjaPricer
             case ItemTypes.Abyss:
             case ItemTypes.Verisium:
             case ItemTypes.Idol:
-                if (priceInDivines >= 0.1)
-                {
-                    var priceInDivinessPerOne = priceInDivines / HoveredItem.CurrencyInfo.StackSize;
-                    AddText(priceInDivinessPerOne >= 0.1
-                        ? $"\nDivine: {priceInDivinesText}d ({priceInDivinessPerOne.FormatNumber(2)}d per one)"
-                        : $"\nDivine: {priceInDivinesText}d");
-                }
-                AddText($"\nExalt: {minPriceText}ex ({(priceInChaos / HoveredItem.CurrencyInfo.StackSize).FormatNumber(2, Settings.VisualPriceSettings.MaximalValueForFractionalDisplay)}ex per one)");
+                AddPriceLines(AddText, priceInExalts, stackSize: HoveredItem.CurrencyInfo.StackSize);
                 break;
             case ItemTypes.UniqueAccessory:
             case ItemTypes.UniqueArmour:
@@ -418,29 +766,13 @@ public partial class NinjaPricer
                 }
 
                 AddSection();
-                if (priceInDivines >= 0.1)
-                {
-                    var maxDivinePriceText = (HoveredItem.PriceData.MaxChaosValue / DivinePrice).FormatNumber(2);
-                    AddText(priceInDivinesText != maxDivinePriceText 
-                        ? $"\nDivine: {priceInDivinesText}d - {maxDivinePriceText}d" 
-                        : $"\nDivine: {priceInDivinesText}d");
-                }
-
-                var maxPriceText = HoveredItem.PriceData.MaxChaosValue.FormatNumber(2, Settings.VisualPriceSettings.MaximalValueForFractionalDisplay);
-                AddText(minPriceText != maxPriceText 
-                    ? $"\nExalt: {minPriceText}ex - {maxPriceText}ex" 
-                    : $"\nExalt: {minPriceText}ex");
+                AddPriceLines(AddText, priceInExalts, HoveredItem.PriceData.MaxChaosValue);
 
                 break;
             case ItemTypes.UniqueMap:
             case ItemTypes.SkillGem:
             case ItemTypes.UncutGem:
-                if (priceInDivines >= 0.1)
-                {
-                    AddText($"\nDivine: {priceInDivinesText}d");
-                }
-
-                AddText($"\nExalt: {minPriceText}ex");
+                AddPriceLines(AddText, priceInExalts);
                 break;
         }
 
@@ -462,19 +794,48 @@ public partial class NinjaPricer
             if (TryGetArtifactPrice(HoveredItem, out var amount, out var artifactName))
             {
                 AddSection();
-                AddText($"\nArtifact price: ({(priceInChaos / amount * 100).FormatNumber(2)}ex per 100 {artifactName})");
+                var artifactPriceText = string.Join(", ", FormatDetailedPriceLines(priceInExalts / amount * 100));
+                AddText($"\nArtifact price: ({artifactPriceText} per 100 {artifactName})");
             }
         }
 
         var tooltipText = string.Join(sectionBreak, textSections.Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => x.Trim()));
         if (!string.IsNullOrWhiteSpace(tooltipText))
         {
+            if (GameController.IsUsingController)
+            {
+                var getControllerRect = GetControllerUiBridgeMethod(
+                    ref _getControllerUiRect,
+                    "ControllerUi.GetRect");
+                var nativeTooltipRect = getControllerRect?.Invoke(HoveredItem.Element.Tooltip);
+                if (nativeTooltipRect is { Width: > 0, Height: > 0 } nativeRect)
+                {
+                    var controllerSettings = Settings.HoveredItemSettings.ControllerSettings;
+                    var tooltipWidth = ImGui.CalcTextSize(tooltipText).X + ImGui.GetStyle().WindowPadding.X * 2;
+                    const float screenEdgeGap = 8;
+                    var maxTooltipX = Math.Max(screenEdgeGap, ImGui.GetIO().DisplaySize.X - tooltipWidth - screenEdgeGap);
+                    var tooltipX = Math.Min(nativeRect.Right + controllerSettings.OffsetX.Value, maxTooltipX);
+                    var tooltipY = nativeRect.Top + controllerSettings.OffsetY.Value;
+
+                    var getHeaderTextRect = GetControllerUiBridgeMethod(
+                        ref _getControllerTooltipHeaderTextRect,
+                        "ControllerUi.GetItemTooltipHeaderTextRect");
+                    var headerTextRect = getHeaderTextRect?.Invoke(HoveredItem.Element.Tooltip);
+                    if (headerTextRect is { Width: > 0 } headerRect)
+                    {
+                        tooltipX = Math.Min(headerRect.Right + controllerSettings.OffsetX.Value, maxTooltipX);
+                    }
+
+                    ImGui.SetNextWindowPos(new Vector2(tooltipX, tooltipY), ImGuiCond.Always);
+                }
+            }
+
             ImGui.BeginTooltip();
-            var hoverTextColor = priceInChaos >= Settings.VisualPriceSettings.ExtraValuableColorThreshold.Value
+            var hoverTextColor = priceInExalts >= Settings.VisualPriceSettings.ExtraValuableColorThreshold.Value
                 ? Settings.VisualPriceSettings.ExtraValuableColor
-                : priceInChaos >= Settings.VisualPriceSettings.ValuableColorThreshold.Value
+                : priceInExalts >= Settings.VisualPriceSettings.ValuableColorThreshold.Value
                     ? Settings.VisualPriceSettings.ValuableColor
-                    : priceInChaos >= Settings.VisualPriceSettings.SemiValuableColorThreshold.Value
+                    : priceInExalts >= Settings.VisualPriceSettings.SemiValuableColorThreshold.Value
                         ? Settings.VisualPriceSettings.SemiValuableColor
                         : null;
             if (hoverTextColor != null)
@@ -498,10 +859,19 @@ public partial class NinjaPricer
         {
             if (!Settings.StashValueSettings.Show || !StashPanel.IsVisible) return;
             {
-                var pos = new Vector2(Settings.StashValueSettings.PositionX.Value, Settings.StashValueSettings.PositionY.Value);
+                var positionX = GameController.IsUsingController
+                    ? Settings.StashValueSettings.ControllerSettings.PositionX.Value
+                    : Settings.StashValueSettings.PositionX.Value;
+                var positionY = GameController.IsUsingController
+                    ? Settings.StashValueSettings.ControllerSettings.PositionY.Value
+                    : Settings.StashValueSettings.PositionY.Value;
+                var topValuedItemCount = GameController.IsUsingController
+                    ? Settings.StashValueSettings.ControllerSettings.TopValuedItemCount.Value
+                    : Settings.StashValueSettings.TopValuedItemCount.Value;
+                var pos = new Vector2(positionX, positionY);
                 var chaosValue = StashTabValue;
                 var topValueItems = GetTopValueItems(ItemsToDrawList)
-                    .Take(Settings.StashValueSettings.TopValuedItemCount.Value)
+                    .Take(topValuedItemCount)
                     .ToList();
 
                 DrawWorthWidget(chaosValue, pos, Settings.VisualPriceSettings.SignificantDigits.Value, Settings.VisualPriceSettings.FontColor, Settings.StashValueSettings.EnableBackground,
@@ -538,15 +908,17 @@ public partial class NinjaPricer
     private void DrawWorthWidget(double chaosValue, Vector2 pos, int significantDigits, Color textColor, bool drawBackground, List<CustomItem> topValueItems) => DrawWorthWidget("", false, chaosValue, pos, significantDigits, textColor, drawBackground, topValueItems);
     private void DrawWorthWidget(string initialString, bool indent, double chaosValue, Vector2 pos, int significantDigits, Color textColor, bool drawBackground, List<CustomItem> topValueItems)
     {
-        var text = $"{initialString}{(indent ? "\t" : "")}Exalt: {chaosValue.FormatNumber(significantDigits)}" + (DivinePrice != null
-            ? $"\n{(indent ? "\t" : "")}Divine: {(chaosValue / DivinePrice).FormatNumber(significantDigits)}"
-            : "");
+        var text = initialString + string.Join("\n", FormatDetailedPriceLines(chaosValue)
+            .Select(line => $"{(indent ? "\t" : "")}{line}"));
         if (topValueItems.Count > 0)
         {
-            var maxChaosValueLength = topValueItems.Max(x => x.PriceData.MinChaosValue.FormatNumber(2, forceDecimals: true).Length);
+            var topValuePrices = topValueItems
+                .Select(x => (Item: x, Text: FormatOverlayPrice(x.PriceData.MinChaosValue, 2)))
+                .ToList();
+            var maxChaosValueLength = topValuePrices.Max(x => x.Text.Length);
             var topValuedTexts = string.Join("\n",
-                topValueItems.Select(x => $"{x.PriceData.MinChaosValue.FormatNumber(2, forceDecimals: true).PadLeft(maxChaosValueLength)}: {x}" +
-                                          (x.CurrencyInfo.StackSize > 0 ? $" ({x.CurrencyInfo.StackSize})" : null)));
+                topValuePrices.Select(x => $"{x.Text.PadLeft(maxChaosValueLength)}: {x.Item}" +
+                                           (x.Item.CurrencyInfo.StackSize > 0 ? $" ({x.Item.CurrencyInfo.StackSize})" : null)));
             text += $"\nTop value:\n{topValuedTexts}";
         }
 
@@ -561,10 +933,24 @@ public partial class NinjaPricer
     {
         try
         {
-            var inventory = GameController.Game.IngameState.IngameUi.InventoryPanel;
-            if (!Settings.InventoryValueSettings.Show.Value || !inventory.IsVisible) return;
+            var ui = GameController.Game.IngameState.IngameUi;
+            var inventory = ui.InventoryPanel;
+            if (!Settings.InventoryValueSettings.Show.Value ||
+                !inventory.IsVisible ||
+                ui.SellWindow?.IsVisible == true ||
+                IsControllerDisenchantWindowVisible())
             {
-                var pos = new Vector2(Settings.InventoryValueSettings.PositionX.Value, Settings.InventoryValueSettings.PositionY.Value);
+                return;
+            }
+
+            {
+                var positionX = GameController.IsUsingController
+                    ? Settings.InventoryValueSettings.ControllerSettings.PositionX.Value
+                    : Settings.InventoryValueSettings.PositionX.Value;
+                var positionY = GameController.IsUsingController
+                    ? Settings.InventoryValueSettings.ControllerSettings.PositionY.Value
+                    : Settings.InventoryValueSettings.PositionY.Value;
+                var pos = new Vector2(positionX, positionY);
                 DrawWorthWidget(InventoryTabValue, pos, Settings.VisualPriceSettings.SignificantDigits.Value, Settings.VisualPriceSettings.FontColor, false, []);
             }
         }
@@ -604,7 +990,7 @@ public partial class NinjaPricer
     {
         var itemValue = item.PriceData.MinChaosValue;
 
-        if (Settings.PriceOverlaySettings.ShowAboveMinValueOnly && Settings.PriceOverlaySettings.MinValueForDisplay >= itemValue) return;
+        if (Settings.PriceOverlaySettings.ShowAboveMinValueOnly && Settings.PriceOverlaySettings.MinValueForDisplay >= GetOverlayDisplayValue(itemValue)) return;
 
         layout ??= new StashPriceOverlayLayout();
 
@@ -632,10 +1018,10 @@ public partial class NinjaPricer
         if (Settings.PriceOverlaySettings.ShowUnitValue)
         {
             itemValue /= item.CurrencyInfo.StackSize;
-            if (itemValue < Settings.PriceOverlaySettings.UnitValueHintThreshold) textColor = Color.Red;
+            if (GetOverlayDisplayValue(itemValue) < Settings.PriceOverlaySettings.UnitValueHintThreshold) textColor = Color.Red;
         }
 
-        Graphics.DrawText(itemValue.FormatNumber(Settings.VisualPriceSettings.SignificantDigits.Value), textPosition, textColor ?? overlayColors.TextColor, FontAlign.Center);
+        Graphics.DrawText(FormatOverlayPrice(itemValue, Settings.VisualPriceSettings.SignificantDigits.Value), textPosition, textColor ?? overlayColors.TextColor, FontAlign.Center);
     }
 
     private void ProcessTradeWindow()
@@ -747,9 +1133,9 @@ public partial class NinjaPricer
                                 : item.PriceData.MinChaosValue > 0) &&
                             (!Settings.GroundItemSettings.OnlyPriceUniquesOnGround || item.Rarity == ItemRarity.Unique))
                         {
-                            var s = item.PriceData.MinChaosValue.FormatNumber(2);
+                            var s = FormatOverlayPrice(item.PriceData.MinChaosValue, 2);
                             if (item.PriceData.MaxChaosValue > item.PriceData.MinChaosValue)
-                                s += $"-{item.PriceData.MaxChaosValue.FormatNumber(2)}";
+                                s += $"-{FormatOverlayPrice(item.PriceData.MaxChaosValue, 2)}";
 
                             using (Graphics.SetTextScale(Settings.GroundItemSettings.GroundPriceTextScale))
                             {
@@ -814,10 +1200,10 @@ public partial class NinjaPricer
                     {
                         if (item.PriceData.MinChaosValue > 0)
                         {
-                            var s = item.PriceData.MinChaosValue.FormatNumber(2);
+                            var s = FormatOverlayPrice(item.PriceData.MinChaosValue, 2);
                             if (item.PriceData.MaxChaosValue > item.PriceData.MinChaosValue)
                             {
-                                s += $"-{item.PriceData.MaxChaosValue.FormatNumber(2)}";
+                                s += $"-{FormatOverlayPrice(item.PriceData.MaxChaosValue, 2)}";
                             }
 
                             using (Graphics.SetTextScale(Settings.GroundItemSettings.GroundPriceTextScale))

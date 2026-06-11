@@ -85,6 +85,18 @@ public class InventoryValueSettings
 
     [Menu(null, "Vertical position of where the value should be drawn")]
     public RangeNode<int> PositionY { get; set; } = new(800, 0, 5000);
+
+    public ControllerInventoryValueSettings ControllerSettings { get; set; } = new();
+}
+
+[Submenu(CollapsedByDefault = true)]
+public class ControllerInventoryValueSettings
+{
+    [Menu(null, "Horizontal position of where the value should be drawn in controller UI")]
+    public RangeNode<int> PositionX { get; set; } = new(100, 0, 5000);
+
+    [Menu(null, "Vertical position of where the value should be drawn in controller UI")]
+    public RangeNode<int> PositionY { get; set; } = new(800, 0, 5000);
 }
 
 [Submenu(CollapsedByDefault = true)]
@@ -99,6 +111,26 @@ public class TradeWindowSettings
 public class HoveredItemSettings
 {
     public ToggleNode Show { get; set; } = new(true);
+    public ControllerHoveredItemSettings ControllerSettings { get; set; } = new();
+
+    public ToggleNode ShowDivineValue { get; set; } = new(true);
+    public ToggleNode OnlyShowDivineAboveThreshold { get; set; } = new(true);
+    public RangeNode<float> DivineDisplayThreshold { get; set; } = new(0.1f, 0, 100000);
+
+    public ToggleNode ShowExaltedValue { get; set; } = new(true);
+    public ToggleNode OnlyShowExaltedAboveThreshold { get; set; } = new(false);
+    public RangeNode<float> ExaltedDisplayThreshold { get; set; } = new(0, 0, 100000);
+
+    public ToggleNode ShowChaosValue { get; set; } = new(true);
+    public ToggleNode OnlyShowChaosAboveThreshold { get; set; } = new(false);
+    public RangeNode<float> ChaosDisplayThreshold { get; set; } = new(0, 0, 100000);
+}
+
+[Submenu(CollapsedByDefault = true)]
+public class ControllerHoveredItemSettings
+{
+    public RangeNode<int> OffsetX { get; set; } = new(0, -2000, 2000);
+    public RangeNode<int> OffsetY { get; set; } = new(0, -2000, 2000);
 }
 
 [Submenu(CollapsedByDefault = true)]
@@ -199,6 +231,7 @@ public class StashValueSettings
     public RangeNode<int> PositionY { get; set; } = new(100, 0, 5000);
 
     public RangeNode<int> TopValuedItemCount { get; set; } = new(3, 0, 10);
+    public ControllerStashValueSettings ControllerSettings { get; set; } = new();
     public ToggleNode EnableBackground { get; set; } = new(true);
     public ToggleNode IgnoreChatPanel { get; set; } = new(false);
     public Dictionary<string, StashPriceOverlayLayout> StashTabPriceOverlayPerType { get; set; } = [];
@@ -300,9 +333,27 @@ public class StashPriceOverlayLayout
 }
 
 [Submenu(CollapsedByDefault = true)]
+public class ControllerStashValueSettings
+{
+    [Menu(null, "Horizontal position of where the value should be drawn in controller UI")]
+    public RangeNode<int> PositionX { get; set; } = new(100, 0, 5000);
+
+    [Menu(null, "Vertical position of where the value should be drawn in controller UI")]
+    public RangeNode<int> PositionY { get; set; } = new(100, 0, 5000);
+
+    public RangeNode<int> TopValuedItemCount { get; set; } = new(3, 0, 10);
+}
+
+[Submenu(CollapsedByDefault = true)]
 public class PriceOverlaySettings
 {
+    public static readonly List<string> DisplayUnits = Enum.GetNames<PriceDisplayUnit>().ToList();
+
     public ToggleNode Show { get; set; } = new(true);
+
+    public ListNode DisplayUnit { get; set; } = new() { Values = new List<string>(DisplayUnits), Value = nameof(PriceDisplayUnit.Exalted) };
+
+    public ToggleNode ShowUnitSuffix { get; set; } = new(false);
 
     [JsonProperty("DoNotDrawWhileAnItemIsHovered2")]
     public ToggleNode DoNotDrawWhileAnItemIsHovered { get; set; } = new(false);
@@ -372,4 +423,11 @@ public enum PriceOverlayEdge
 {
     Outside,
     Inside
+}
+
+public enum PriceDisplayUnit
+{
+    Chaos,
+    Exalted,
+    Divine
 }

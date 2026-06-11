@@ -35,6 +35,7 @@ public partial class NinjaPricer : BaseSettingsPlugin<NinjaPricerSettings>
         Directory.CreateDirectory(NinjaDirectory);
 
         UpdateLeagueList();
+        UpdateOverlayDisplayUnitList();
         _downloader.StartDataReload(Settings.DataSourceSettings.League.Value, false);
 
         Settings.DataSourceSettings.ReloadPrices.OnPressed += () => _downloader.StartDataReload(Settings.DataSourceSettings.League.Value, true);
@@ -67,6 +68,14 @@ public partial class NinjaPricer : BaseSettingsPlugin<NinjaPricerSettings>
             var customItem = new CustomItem(baseItemType);
             GetValue(customItem);
             return customItem.PriceData.MinChaosValue;
+        });
+        GameController.PluginBridge.SaveMethod("NinjaPrice.GetExactNameValue", (string name) =>
+        {
+            return GetExactNameValue(name);
+        });
+        GameController.PluginBridge.SaveMethod("NinjaPrice.FormatOverlayPrice", (double exaltedValue) =>
+        {
+            return FormatOverlayPrice(exaltedValue, Settings.VisualPriceSettings.SignificantDigits.Value);
         });
 
         Settings.SoundNotificationSettings.ResetEntityNotificationFlags.OnPressed += () =>
@@ -234,6 +243,64 @@ public partial class NinjaPricer : BaseSettingsPlugin<NinjaPricerSettings>
         }
 
         Settings.DataSourceSettings.League.SetListValues(leagueList.ToList());
+    }
+
+    private void UpdateOverlayDisplayUnitList()
+    {
+        var selectedUnit = Enum.TryParse<PriceDisplayUnit>(Settings.PriceOverlaySettings.DisplayUnit.Value, out var unit)
+            ? unit.ToString()
+            : nameof(PriceDisplayUnit.Exalted);
+
+        Settings.PriceOverlaySettings.DisplayUnit.SetListValues(PriceOverlaySettings.DisplayUnits.ToList());
+        Settings.PriceOverlaySettings.DisplayUnit.Value = selectedUnit;
+    }
+
+    private double GetExactNameValue(string name)
+    {
+        if (CollectedData == null || string.IsNullOrWhiteSpace(name))
+        {
+            return 0;
+        }
+
+        var exchangeValues = new[]
+            {
+                CollectedData.Currency,
+                CollectedData.Breach,
+                CollectedData.Delirium,
+                CollectedData.Essences,
+                CollectedData.Runes,
+                CollectedData.Ritual,
+                CollectedData.Fragments,
+                CollectedData.UncutGems,
+                CollectedData.Abyss,
+                CollectedData.Expedition,
+                CollectedData.Verisium,
+                CollectedData.LineageSupportGems,
+                CollectedData.SoulCores,
+                CollectedData.Idols
+            }
+            .Where(data => data != null)
+            .Select(data => (Data: data, Match: data.LinesByName.GetValueOrDefault(name)))
+            .Where(x => x.Match != default)
+            .Select(x => x.Match.Line.PrimaryValue * x.Data.PrimaryToExaltedRate);
+
+        var uniqueValues = new[]
+            {
+                CollectedData.Weapons,
+                CollectedData.Armour,
+                CollectedData.Accessories,
+                CollectedData.Flasks,
+                CollectedData.Jewels,
+                CollectedData.Maps,
+                CollectedData.Charms,
+                CollectedData.SanctumRelics
+            }
+            .Where(data => data != null)
+            .SelectMany(data => data.Lines
+                .Where(line => line.Name == name)
+                .Select(line => line.PrimaryValue * data.PrimaryToExaltedRate));
+
+        return exchangeValues.Concat(uniqueValues).DefaultIfEmpty().Max();
     }
 
     private string PlayerLeague
