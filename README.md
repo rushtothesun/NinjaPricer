@@ -1,4 +1,14 @@
+## Changes in this fork
+- Added controller-mode detection for hover tooltips, inventory, stash, sell window, gemcutting, and disenchant windows.
+- Added `PriceDisplayUnit` options: `Chaos`, `Exalted`, and `Divine`.
+- Added `ShowUnitSuffix` for unit suffixes: `c`, `ex`, and `d`.
+- Added hovered-item display toggles for Divine, Exalted, and Chaos values.
+- Added `ShowChangeInLast7Days` to make the "Change in last 7 Days" tooltip line optional.
+- Added per-unit thresholds like `OnlyShowDivineAboveThreshold` and `DivineDisplayThreshold`.
+- Added `NinjaPrice.GetExactNameValue` and `NinjaPrice.FormatOverlayPrice` plugin bridge methods.
+
 # NinjaPricer
+
 ExileCore2 Plugin for instant price checking. Originally made by https://github.com/DetectiveSquirrel/
 
 What does it do?
