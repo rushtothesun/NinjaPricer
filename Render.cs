@@ -40,17 +40,6 @@ public partial class NinjaPricer
 
     private CustomItem HoveredItem;
     private RectangleF? HoveredItemTooltipRect;
-    private Func<Element, RectangleF?> _getControllerUiRect;
-    private Func<Element, RectangleF?> _getControllerTooltipHeaderTextRect;
-    private Func<List<NormalInventoryItem>> _getControllerVisibleStashItems;
-    private Func<List<NormalInventoryItem>> _getControllerVisibleInventoryItems;
-    private Func<List<NormalInventoryItem>> _getControllerVisibleSellWindowItems;
-    private Func<bool> _getControllerGemcuttingWindowVisible;
-    private bool _isControllerGemcuttingWindowVisible;
-    private DateTime _nextControllerGemcuttingWindowCheck = DateTime.MinValue;
-    private Func<bool> _getControllerDisenchantWindowVisible;
-    private bool _isControllerDisenchantWindowVisible;
-    private DateTime _nextControllerDisenchantWindowCheck = DateTime.MinValue;
 
     private readonly CachedValue<List<ItemOnGround>> _slowGroundItems;
     private readonly CachedValue<List<ItemOnGround>> _groundItems;
@@ -58,6 +47,7 @@ public partial class NinjaPricer
 
     public NinjaPricer()
     {
+        _controllerUi = new ControllerUi(this);
         _slowGroundItems = new TimeCache<List<ItemOnGround>>(GetItemsOnGroundSlow, 500);
         _groundItems = new FrameCache<List<ItemOnGround>>(CacheUtils.RememberLastValue(GetItemsOnGround, new List<ItemOnGround>()));
     }
@@ -181,7 +171,7 @@ public partial class NinjaPricer
                 }
                 else if (GameController.IsUsingController &&
                          IsControllerSellWindowVisible() &&
-                         GetControllerSellWindowItems() is { Count: > 0 } sellWindowItems)
+                         _controllerUi.GetVisibleSellWindowItems() is { Count: > 0 } sellWindowItems)
                 {
                     ItemList = sellWindowItems;
                 }
@@ -241,7 +231,7 @@ public partial class NinjaPricer
 
     public void DrawGraphics()
     {
-        var suppressContainerPrices = IsControllerGemcuttingWindowVisible();
+        var suppressContainerPrices = _controllerUi.IsGemcuttingWindowVisible();
         ProcessItemsOnGround();
         ProcessTradeWindow();
         if (!suppressContainerPrices)
@@ -292,65 +282,7 @@ public partial class NinjaPricer
         }
     }
 
-    private T GetControllerUiBridgeMethod<T>(ref T method, string name)
-        where T : class
-    {
-        if (!GameController.IsUsingController)
-        {
-            return null;
-        }
 
-        try
-        {
-            method ??= GameController.PluginBridge.GetMethod<T>(name);
-        }
-        catch
-        {
-            method = null;
-        }
-
-        return method;
-    }
-
-    private bool IsControllerGemcuttingWindowVisible()
-    {
-        if (!GameController.IsUsingController)
-        {
-            return false;
-        }
-
-        if (DateTime.UtcNow < _nextControllerGemcuttingWindowCheck)
-        {
-            return _isControllerGemcuttingWindowVisible;
-        }
-
-        _nextControllerGemcuttingWindowCheck = DateTime.UtcNow.AddMilliseconds(1000);
-        var isGemcuttingWindowVisible = GetControllerUiBridgeMethod(
-            ref _getControllerGemcuttingWindowVisible,
-            "ControllerUi.IsGemcuttingWindowVisible");
-        _isControllerGemcuttingWindowVisible = isGemcuttingWindowVisible?.Invoke() == true;
-        return _isControllerGemcuttingWindowVisible;
-    }
-
-    private bool IsControllerDisenchantWindowVisible()
-    {
-        if (!GameController.IsUsingController)
-        {
-            return false;
-        }
-
-        if (DateTime.UtcNow < _nextControllerDisenchantWindowCheck)
-        {
-            return _isControllerDisenchantWindowVisible;
-        }
-
-        _nextControllerDisenchantWindowCheck = DateTime.UtcNow.AddMilliseconds(1000);
-        var isDisenchantWindowVisible = GetControllerUiBridgeMethod(
-            ref _getControllerDisenchantWindowVisible,
-            "ControllerUi.IsDisenchantWindowVisible");
-        _isControllerDisenchantWindowVisible = isDisenchantWindowVisible?.Invoke() == true;
-        return _isControllerDisenchantWindowVisible;
-    }
 
     private InventoryType? GetVisibleStashType()
     {
@@ -373,19 +305,9 @@ public partial class NinjaPricer
                 : [];
         }
 
-        var getControllerStashItems = GetControllerUiBridgeMethod(
-            ref _getControllerVisibleStashItems,
-            "ControllerUi.GetVisibleStashItems");
-        return getControllerStashItems?.Invoke() ?? [];
+        return _controllerUi.GetVisibleStashItems();
     }
 
-    private List<NormalInventoryItem> GetControllerSellWindowItems()
-    {
-        var getControllerSellWindowItems = GetControllerUiBridgeMethod(
-            ref _getControllerVisibleSellWindowItems,
-            "ControllerUi.GetVisibleSellWindowItems");
-        return getControllerSellWindowItems?.Invoke() ?? [];
-    }
 
     private static Element FindControllerStashScrollViewport(IEnumerable<CustomItem> items)
     {
@@ -804,10 +726,7 @@ public partial class NinjaPricer
         {
             if (GameController.IsUsingController)
             {
-                var getControllerRect = GetControllerUiBridgeMethod(
-                    ref _getControllerUiRect,
-                    "ControllerUi.GetRect");
-                var nativeTooltipRect = getControllerRect?.Invoke(HoveredItem.Element.Tooltip);
+                var nativeTooltipRect = _controllerUi.GetRect(HoveredItem.Element.Tooltip);
                 if (nativeTooltipRect is { Width: > 0, Height: > 0 } nativeRect)
                 {
                     var controllerSettings = Settings.HoveredItemSettings.ControllerSettings;
@@ -817,10 +736,7 @@ public partial class NinjaPricer
                     var tooltipX = Math.Min(nativeRect.Right + controllerSettings.OffsetX.Value, maxTooltipX);
                     var tooltipY = nativeRect.Top + controllerSettings.OffsetY.Value;
 
-                    var getHeaderTextRect = GetControllerUiBridgeMethod(
-                        ref _getControllerTooltipHeaderTextRect,
-                        "ControllerUi.GetItemTooltipHeaderTextRect");
-                    var headerTextRect = getHeaderTextRect?.Invoke(HoveredItem.Element.Tooltip);
+                    var headerTextRect = _controllerUi.GetItemTooltipHeaderTextRect(HoveredItem.Element.Tooltip);
                     if (headerTextRect is { Width: > 0 } headerRect)
                     {
                         tooltipX = Math.Min(headerRect.Right + controllerSettings.OffsetX.Value, maxTooltipX);
@@ -938,7 +854,7 @@ public partial class NinjaPricer
             if (!Settings.InventoryValueSettings.Show.Value ||
                 !inventory.IsVisible ||
                 ui.SellWindow?.IsVisible == true ||
-                IsControllerDisenchantWindowVisible())
+                _controllerUi.IsDisenchantWindowVisible())
             {
                 return;
             }

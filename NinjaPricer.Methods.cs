@@ -65,10 +65,7 @@ public partial class NinjaPricer
             return inventory[InventoryIndex.PlayerInventory].VisibleInventoryItems.ToList();
         }
 
-        var getControllerInventoryItems = GetControllerUiBridgeMethod(
-            ref _getControllerVisibleInventoryItems,
-            "ControllerUi.GetVisibleInventoryItems");
-        return getControllerInventoryItems?.Invoke() ?? [];
+        return _controllerUi.GetVisibleInventoryItems();
     }
 
     private static List<CustomItem> FormatItems(IEnumerable<NormalInventoryItem> itemList)

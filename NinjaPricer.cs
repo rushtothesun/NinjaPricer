@@ -24,6 +24,7 @@ public partial class NinjaPricer : BaseSettingsPlugin<NinjaPricerSettings>
     private int _updating;
     public Dictionary<string, List<string>> UniqueArtMapping = new Dictionary<string, List<string>>();
     private readonly DataDownloader _downloader = new DataDownloader();
+    private readonly ControllerUi _controllerUi;
     private Dictionary<string, string> _soundFiles = [];
 
     public override bool Initialise()
