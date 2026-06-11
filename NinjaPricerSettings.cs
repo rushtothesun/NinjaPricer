@@ -112,6 +112,7 @@ public class HoveredItemSettings
 {
     public ToggleNode Show { get; set; } = new(true);
     public ControllerHoveredItemSettings ControllerSettings { get; set; } = new();
+    public ToggleNode ShowChangeInLast7Days { get; set; } = new(true);
 
     public ToggleNode ShowDivineValue { get; set; } = new(true);
     public ToggleNode OnlyShowDivineAboveThreshold { get; set; } = new(true);

@@ -648,7 +648,8 @@ public partial class NinjaPricer
         var changeText = $"Change in last 7 Days: {HoveredItem.PriceData.ChangeInLast7Days:+#;-#;0}%";
         var changeTextLength = changeText.Length - 1;
         var sectionBreak = $"\n{new string('-', changeTextLength)}\n";
-        if (Math.Abs(HoveredItem.PriceData.ChangeInLast7Days) > 0.5)
+        if (Settings.HoveredItemSettings.ShowChangeInLast7Days &&
+            Math.Abs(HoveredItem.PriceData.ChangeInLast7Days) > 0.5)
         {
             AddText(changeText);
         }
