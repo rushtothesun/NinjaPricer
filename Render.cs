@@ -377,7 +377,9 @@ public partial class NinjaPricer
 
     private void ProcessExchangeCurrencyPicker()
     {
-        if (GameController.IngameState.IngameUi.CurrencyExchangePanel?.CurrencyPicker is { IsValid: true, IsVisible: true } picker)
+        if (GameController.IngameState.IngameUi.CurrencyExchangePanel?.CurrencyPicker is { IsValid: true, IsVisible: true } picker &&
+            picker.OptionContainer != null &&
+            picker.Options != null)
         {
             var pickerRect = picker.OptionContainer.GetClientRectCache;
             var anyIntersect = false;
